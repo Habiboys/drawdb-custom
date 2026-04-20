@@ -1,0 +1,418 @@
+import { Image, Input, Modal as SemiUIModal, Spin } from "@douyinfe/semi-ui";
+import { saveAs } from "file-saver";
+import { Parser } from "node-sql-parser";
+import { Parser as OracleParser } from "oracle-sql-parser";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { DB, MODAL, STATUS } from "../../../data/constants";
+import { databases } from "../../../data/databases";
+import {
+  useAreas,
+  useDiagram,
+  useEnums,
+  useNotes,
+  useSettings,
+  useTransform,
+  useTypes,
+  useUndoRedo,
+} from "../../../hooks";
+import { isRtl } from "../../../i18n/utils/rtl";
+import { mergeCustomTypes } from "../../../utils/customTypes";
+import { importSQL } from "../../../utils/importSQL";
+import {
+  getModalTitle,
+  getModalWidth,
+  getOkText,
+} from "../../../utils/modalData";
+import CodeEditor from "../../CodeEditor";
+import ImportDiagram from "./ImportDiagram";
+import ImportSource from "./ImportSource";
+import Language from "./Language";
+import New from "./New";
+import Open from "./Open";
+import Rename from "./Rename";
+import SetTableWidth from "./SetTableWidth";
+import Share from "./Share";
+
+const extensionToLanguage = {
+  md: "markdown",
+  sql: "sql",
+  dbml: "dbml",
+  json: "json",
+};
+
+const sanitizeMySQLDump = (sql) => {
+  return sql
+    .replace(/^\s*--.*$/gm, "")
+    .replace(/^\s*#.*$/gm, "")
+    .replace(/\/\*![\s\S]*?\*\//g, "")
+    .replace(/^\s*(START\s+TRANSACTION|COMMIT|ROLLBACK)\s*;?\s*$/gim, "")
+    .replace(/^\s*SET\s+[^;]+;\s*$/gim, "")
+    .replace(/^\s*\/\*[\s\S]*?\*\/\s*$/gm, "")
+    .trim();
+};
+
+export default function Modal({
+  modal,
+  setModal,
+  title,
+  setTitle,
+  exportData,
+  setExportData,
+  importDb,
+  importFrom,
+}) {
+  const { t, i18n } = useTranslation();
+  const { setTables, setRelationships, database } = useDiagram();
+  const { setNotes } = useNotes();
+  const { setAreas } = useAreas();
+  const { setTypes } = useTypes();
+  const { setEnums } = useEnums();
+  const { setTransform } = useTransform();
+  const { setUndoStack, setRedoStack } = useUndoRedo();
+  const { settings, setSettings } = useSettings();
+  const [uncontrolledTitle, setUncontrolledTitle] = useState(title);
+  const [uncontrolledLanguage, setUncontrolledLanguage] = useState(
+    i18n.language,
+  );
+  const [tempTableWidth, setTempTableWidth] = useState(settings.tableWidth);
+  const [importSource, setImportSource] = useState({
+    src: "",
+    overwrite: false,
+  });
+  const [importData, setImportData] = useState(null);
+  const [error, setError] = useState({
+    type: STATUS.NONE,
+    message: "",
+  });
+  const [selectedTemplateId, setSelectedTemplateId] = useState(-1);
+  const [selectedDiagramId, setSelectedDiagramId] = useState(0);
+  const [saveAsTitle, setSaveAsTitle] = useState(title);
+  const navigate = useNavigate();
+
+  const overwriteDiagram = () => {
+    setTables(importData.tables);
+    setRelationships(importData.relationships);
+    setAreas(importData.subjectAreas ?? []);
+    setNotes(importData.notes ?? []);
+    if (importData.title) {
+      setTitle(importData.title);
+    }
+    if (databases[database].hasEnums && importData.enums) {
+      setEnums(importData.enums);
+    }
+    if (databases[database].hasTypes && importData.types) {
+      setTypes(importData.types);
+    }
+    if (importData.customTypes) {
+      mergeCustomTypes(importData.customTypes);
+    }
+  };
+
+  const parseSQLAndLoadDiagram = () => {
+    const targetDatabase = database === DB.GENERIC ? importDb : database;
+
+    let ast = null;
+    const parseWithDialect = (src) => {
+      if (targetDatabase === DB.ORACLESQL) {
+        const oracleParser = new OracleParser();
+        return oracleParser.parse(src);
+      }
+
+      const parser = new Parser();
+      return parser.astify(src, {
+        database: targetDatabase,
+      });
+    };
+
+    try {
+      ast = parseWithDialect(importSource.src);
+    } catch (error) {
+      const canRetryWithSanitizer =
+        targetDatabase === DB.MYSQL || targetDatabase === DB.MARIADB;
+
+      if (canRetryWithSanitizer) {
+        try {
+          ast = parseWithDialect(sanitizeMySQLDump(importSource.src));
+        } catch {
+          const message = error.location
+            ? `${error.name} [Ln ${error.location.start.line}, Col ${error.location.start.column}]: ${error.message}`
+            : error.message;
+
+          setError({
+            type: STATUS.ERROR,
+            message: `${message}\n\nTip: SQL dump phpMyAdmin sering berisi statement non-DDL (SET/TRANSACTION/conditional comments). Coba import schema-only (CREATE/ALTER TABLE) jika masih gagal.`,
+          });
+          return;
+        }
+      } else {
+        const message = error.location
+          ? `${error.name} [Ln ${error.location.start.line}, Col ${error.location.start.column}]: ${error.message}`
+          : error.message;
+
+        setError({ type: STATUS.ERROR, message });
+        return;
+      }
+    }
+
+    try {
+      const diagramData = importSQL(
+        ast,
+        database === DB.GENERIC ? importDb : database,
+        database,
+      );
+
+      if (importSource.overwrite) {
+        setTables(diagramData.tables);
+        setRelationships(diagramData.relationships);
+        if (databases[database].hasTypes) setTypes(diagramData.types ?? []);
+        if (databases[database].hasEnums) setEnums(diagramData.enums ?? []);
+        setTransform((prev) => ({ ...prev, pan: { x: 0, y: 0 } }));
+        setNotes([]);
+        setAreas([]);
+      } else {
+        setTables((prev) => [...prev, ...diagramData.tables]);
+        setRelationships((prev) =>
+          [...prev, ...diagramData.relationships].map((r, i) => ({
+            ...r,
+            id: i,
+          })),
+        );
+        if (databases[database].hasTypes && diagramData.types.length)
+          setTypes((prev) => [...prev, ...diagramData.types]);
+        if (databases[database].hasEnums && diagramData.enums.length)
+          setEnums((prev) => [...prev, ...diagramData.enums]);
+      }
+
+      setUndoStack([]);
+      setRedoStack([]);
+
+      setModal(MODAL.NONE);
+    } catch (e) {
+      setError({
+        type: STATUS.ERROR,
+        message:
+          e?.message ||
+          `Please check for syntax errors or let us know about the error.`,
+      });
+    }
+  };
+
+  const getModalOnOk = async () => {
+    switch (modal) {
+      case MODAL.IMG:
+        saveAs(
+          exportData.data,
+          `${exportData.filename}.${exportData.extension}`,
+        );
+        return;
+      case MODAL.CODE: {
+        const blob = new Blob([exportData.data], {
+          type: "application/json",
+        });
+        saveAs(blob, `${exportData.filename}.${exportData.extension}`);
+        return;
+      }
+      case MODAL.IMPORT:
+        if (error.type !== STATUS.ERROR) {
+          setTransform((prev) => ({ ...prev, pan: { x: 0, y: 0 } }));
+          overwriteDiagram();
+          setImportData(null);
+          setModal(MODAL.NONE);
+          setUndoStack([]);
+          setRedoStack([]);
+        }
+        return;
+      case MODAL.IMPORT_SRC:
+        parseSQLAndLoadDiagram();
+        return;
+      case MODAL.OPEN:
+        if (!selectedDiagramId) return;
+        navigate(`/editor/diagrams/${selectedDiagramId}`, "_blank");
+        setModal(MODAL.NONE);
+        return;
+      case MODAL.RENAME:
+        setTitle(uncontrolledTitle);
+        setModal(MODAL.NONE);
+        return;
+      case MODAL.SAVEAS:
+        setTitle(saveAsTitle);
+        setModal(MODAL.NONE);
+        return;
+      case MODAL.NEW:
+        window.open("/editor/templates/" + selectedTemplateId, "_blank");
+        setModal(MODAL.NONE);
+        return;
+      case MODAL.LANGUAGE:
+        i18n.changeLanguage(uncontrolledLanguage);
+        setModal(MODAL.NONE);
+        return;
+      case MODAL.TABLE_WIDTH:
+        setSettings((prev) => ({ ...prev, tableWidth: tempTableWidth }));
+        setModal(MODAL.NONE);
+        return;
+      default:
+        setModal(MODAL.NONE);
+        return;
+    }
+  };
+
+  const getModalBody = () => {
+    switch (modal) {
+      case MODAL.IMPORT:
+        return (
+          <ImportDiagram
+            setImportData={setImportData}
+            error={error}
+            setError={setError}
+            importFrom={importFrom}
+          />
+        );
+      case MODAL.IMPORT_SRC:
+        return (
+          <ImportSource
+            importData={importSource}
+            setImportData={setImportSource}
+            error={error}
+            setError={setError}
+          />
+        );
+      case MODAL.NEW:
+        return (
+          <New
+            selectedTemplateId={selectedTemplateId}
+            setSelectedTemplateId={setSelectedTemplateId}
+          />
+        );
+      case MODAL.RENAME:
+        return (
+          <Rename key={title} title={title} setTitle={setUncontrolledTitle} />
+        );
+      case MODAL.OPEN:
+        return (
+          <Open
+            selectedDiagramId={selectedDiagramId}
+            setSelectedDiagramId={setSelectedDiagramId}
+          />
+        );
+      case MODAL.SAVEAS:
+        return (
+          <Input
+            placeholder={t("name")}
+            value={saveAsTitle}
+            onChange={(v) => setSaveAsTitle(v)}
+          />
+        );
+      case MODAL.CODE:
+      case MODAL.IMG:
+        if (exportData.data !== "" || exportData.data) {
+          return (
+            <>
+              {modal === MODAL.IMG ? (
+                <Image src={exportData.data} alt="Diagram" height={280} />
+              ) : (
+                <CodeEditor
+                  height={360}
+                  value={exportData.data}
+                  language={extensionToLanguage[exportData.extension]}
+                  options={{ readOnly: true }}
+                  showCopyButton={true}
+                />
+              )}
+              <div className="text-sm font-semibold mt-2">{t("filename")}:</div>
+              <Input
+                value={exportData.filename}
+                placeholder={t("filename")}
+                suffix={<div className="p-2">{`.${exportData.extension}`}</div>}
+                onChange={(value) =>
+                  setExportData((prev) => ({ ...prev, filename: value }))
+                }
+                field="filename"
+              />
+            </>
+          );
+        } else {
+          return (
+            <div className="text-center my-3 text-sky-600">
+              <Spin tip={t("loading")} size="large" />
+            </div>
+          );
+        }
+      case MODAL.TABLE_WIDTH:
+        return (
+          <SetTableWidth
+            tempWidth={tempTableWidth}
+            setTempWidth={setTempTableWidth}
+          />
+        );
+      case MODAL.LANGUAGE:
+        return (
+          <Language
+            language={uncontrolledLanguage}
+            setLanguage={setUncontrolledLanguage}
+          />
+        );
+      case MODAL.SHARE:
+        return <Share title={title} setModal={setModal} />;
+      default:
+        return <></>;
+    }
+  };
+
+  return (
+    <SemiUIModal
+      style={isRtl(i18n.language) ? { direction: "rtl" } : {}}
+      title={getModalTitle(modal)}
+      visible={modal !== MODAL.NONE && modal !== MODAL.CONFIG_CUSTOM_TYPES}
+      onOk={getModalOnOk}
+      afterClose={() => {
+        setExportData(() => ({
+          data: "",
+          extension: "",
+          filename: `${title}_${new Date().toISOString()}`,
+        }));
+        setError({
+          type: STATUS.NONE,
+          message: "",
+        });
+        setImportData(null);
+        setImportSource({
+          src: "",
+          overwrite: false,
+        });
+      }}
+      onCancel={() => {
+        if (modal === MODAL.RENAME) setUncontrolledTitle(title);
+        if (modal === MODAL.LANGUAGE) setUncontrolledLanguage(i18n.language);
+        if (modal === MODAL.TABLE_WIDTH) setTempTableWidth(settings.tableWidth);
+        setModal(MODAL.NONE);
+      }}
+      centered
+      closeOnEsc={true}
+      okText={getOkText(modal)}
+      okButtonProps={{
+        disabled:
+          (error && error?.type === STATUS.ERROR) ||
+          (modal === MODAL.IMPORT &&
+            (error.type === STATUS.ERROR || !importData)) ||
+          (modal === MODAL.RENAME && title === "") ||
+          ((modal === MODAL.IMG || modal === MODAL.CODE) && !exportData.data) ||
+          (modal === MODAL.SAVEAS && saveAsTitle === "") ||
+          (modal === MODAL.IMPORT_SRC && importSource.src === ""),
+        hidden: modal === MODAL.SHARE,
+      }}
+      hasCancel={modal !== MODAL.SHARE}
+      cancelText={t("cancel")}
+      width={getModalWidth(modal)}
+      bodyStyle={{
+        maxHeight: window.innerHeight - 280,
+        overflow:
+          modal === MODAL.CODE || modal === MODAL.IMG ? "hidden" : "auto",
+        direction: "ltr",
+      }}
+    >
+      {getModalBody()}
+    </SemiUIModal>
+  );
+}

@@ -1,0 +1,152 @@
+import { IconLink } from "@douyinfe/semi-icons";
+import { Banner, Button, Input, Spin, Toast } from "@douyinfe/semi-ui";
+import { useCallback, useContext, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { create, patch, SHARE_FILENAME } from "../../../api/gists";
+import { IdContext } from "../../../context/IdContext";
+import { MODAL } from "../../../data/constants";
+import { databases } from "../../../data/databases";
+import {
+  useAreas,
+  useDiagram,
+  useEnums,
+  useNotes,
+  useTransform,
+  useTypes,
+} from "../../../hooks";
+import { getCustomTypes } from "../../../utils/customTypes";
+
+export default function Share({ title, setModal }) {
+  const { t } = useTranslation();
+  const { gistId, setGistId } = useContext(IdContext);
+  const [loading, setLoading] = useState(true);
+  const { tables, relationships, database } = useDiagram();
+  const { notes } = useNotes();
+  const { areas } = useAreas();
+  const { types } = useTypes();
+  const { enums } = useEnums();
+  const { transform } = useTransform();
+  const [error, setError] = useState(null);
+  const url = window.location.origin + "/editor?shareId=" + gistId;
+
+  const diagramToString = useCallback(() => {
+    const allCustomTypes = getCustomTypes();
+    const usedFieldTypes = new Set(
+      tables.flatMap((t) => t.fields.map((f) => f.type.toUpperCase())),
+    );
+    const usedCustomTypes = {};
+    for (const [db, types] of Object.entries(allCustomTypes)) {
+      for (const [name, entry] of Object.entries(types)) {
+        if (usedFieldTypes.has(name)) {
+          if (!usedCustomTypes[db]) usedCustomTypes[db] = {};
+          usedCustomTypes[db][name] = entry;
+        }
+      }
+    }
+    const hasCustomTypes = Object.keys(usedCustomTypes).length > 0;
+
+    return JSON.stringify({
+      title,
+      tables: tables,
+      relationships: relationships,
+      notes: notes,
+      subjectAreas: areas,
+      database: database,
+      ...(databases[database].hasTypes && { types: types }),
+      ...(databases[database].hasEnums && { enums: enums }),
+      ...(hasCustomTypes && { customTypes: usedCustomTypes }),
+      transform: transform,
+    });
+  }, [
+    areas,
+    notes,
+    tables,
+    relationships,
+    database,
+    title,
+    enums,
+    types,
+    transform,
+  ]);
+
+  const unshare = useCallback(async () => {
+    try {
+      const deleted = await patch(gistId, SHARE_FILENAME, undefined);
+      if (deleted) {
+        setGistId("");
+      }
+      setModal(MODAL.NONE);
+    } catch (e) {
+      console.error(e);
+      setError(e);
+    }
+  }, [gistId, setModal, setGistId]);
+
+  useEffect(() => {
+    const updateOrGenerateLink = async () => {
+      try {
+        setLoading(true);
+        if (!gistId || gistId === "") {
+          const id = await create(SHARE_FILENAME, diagramToString());
+          setGistId(id);
+        } else {
+          await patch(gistId, SHARE_FILENAME, diagramToString());
+        }
+      } catch (e) {
+        setError(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    updateOrGenerateLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const copyLink = () => {
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        Toast.success(t("copied_to_clipboard"));
+      })
+      .catch(() => {
+        Toast.error(t("oops_smth_went_wrong"));
+      });
+  };
+
+  if (loading)
+    return (
+      <div className="text-blue-500 text-center">
+        <Spin size="middle" />
+        <div>{t("loading")}</div>
+      </div>
+    );
+
+  return (
+    <div>
+      {error && (
+        <Banner
+          description={t("oops_smth_went_wrong")}
+          type="danger"
+          closeIcon={null}
+          fullMode={false}
+        />
+      )}
+      {!error && (
+        <>
+          <div className="flex gap-3">
+            <Input value={url} size="large" readonly />
+          </div>
+          <div className="text-xs mt-2">{t("share_info")}</div>
+          <div className="flex gap-2 mt-3">
+            <Button block onClick={unshare}>
+              {t("unshare")}
+            </Button>
+            <Button block theme="solid" icon={<IconLink />} onClick={copyLink}>
+              {t("copy_link")}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
