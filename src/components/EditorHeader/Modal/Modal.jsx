@@ -5,6 +5,7 @@ import { Parser as OracleParser } from "oracle-sql-parser";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { nanoid } from "nanoid";
 import { DB, MODAL, STATUS } from "../../../data/constants";
 import { databases } from "../../../data/databases";
 import {
@@ -53,6 +54,13 @@ const sanitizeMySQLDump = (sql) => {
     .trim();
 };
 
+const normalizeImportedEnums = (enums = []) =>
+  enums.map((e, i) => ({
+    id: e.id ?? nanoid(),
+    name: e.name ?? `enum_${i}`,
+    values: Array.isArray(e.values) ? e.values : [],
+  }));
+
 export default function Modal({
   modal,
   setModal,
@@ -64,7 +72,7 @@ export default function Modal({
   importFrom,
 }) {
   const { t, i18n } = useTranslation();
-  const { setTables, setRelationships, database } = useDiagram();
+  const { setTables, setRelationships, database, setDatabase } = useDiagram();
   const { setNotes } = useNotes();
   const { setAreas } = useAreas();
   const { setTypes } = useTypes();
@@ -162,12 +170,18 @@ export default function Modal({
         database === DB.GENERIC ? importDb : database,
         database,
       );
+      const targetDatabase = database === DB.GENERIC ? importDb : database;
+      const normalizedEnums = normalizeImportedEnums(diagramData.enums ?? []);
+
+      if (database === DB.GENERIC && targetDatabase && targetDatabase !== DB.GENERIC) {
+        setDatabase(targetDatabase);
+      }
 
       if (importSource.overwrite) {
         setTables(diagramData.tables);
         setRelationships(diagramData.relationships);
         if (databases[database].hasTypes) setTypes(diagramData.types ?? []);
-        if (databases[database].hasEnums) setEnums(diagramData.enums ?? []);
+        if (databases[targetDatabase].hasEnums) setEnums(normalizedEnums);
         setTransform((prev) => ({ ...prev, pan: { x: 0, y: 0 } }));
         setNotes([]);
         setAreas([]);
@@ -181,8 +195,8 @@ export default function Modal({
         );
         if (databases[database].hasTypes && diagramData.types.length)
           setTypes((prev) => [...prev, ...diagramData.types]);
-        if (databases[database].hasEnums && diagramData.enums.length)
-          setEnums((prev) => [...prev, ...diagramData.enums]);
+        if (databases[targetDatabase].hasEnums && normalizedEnums.length)
+          setEnums((prev) => [...prev, ...normalizedEnums]);
       }
 
       setUndoStack([]);

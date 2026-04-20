@@ -256,6 +256,7 @@ export function fromPostgres(ast, diagramDb = DB.GENERIC) {
       } else if (e.keyword === "type") {
         if (e.resource === "enum") {
           const newEnum = {
+            id: nanoid(),
             name: e.name.name,
             values: e.create_definitions.value.map((x) => x.value),
           };

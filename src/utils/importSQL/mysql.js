@@ -45,9 +45,11 @@ export function fromMySQL(ast, diagramDb = DB.GENERIC) {
             field.id = nanoid();
             field.name = d.column.column;
 
-            let type = d.definition.dataType;
-            if (!dbToTypes[diagramDb][type]) {
-              type = affinity[diagramDb][type];
+            const rawType = String(d.definition.dataType || "");
+            const normalizedType = rawType.toUpperCase();
+            let type = normalizedType;
+            if (!dbToTypes[diagramDb][normalizedType]) {
+              type = affinity[diagramDb][normalizedType];
             }
             field.type = type;
 

@@ -1,5 +1,5 @@
 import { SideSheet } from "@douyinfe/semi-ui";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Cardinality, ObjectType, Tab } from "../../data/constants";
 import { useDiagram, useLayout, useSelect, useSettings } from "../../hooks";
@@ -10,14 +10,20 @@ const labelFontSize = 16;
 
 function Relationship({ data }) {
   const { settings } = useSettings();
-  const { tablesMap } = useDiagram();
+  const { tables } = useDiagram();
   const { layout } = useLayout();
   const { selectedElement, setSelectedElement } = useSelect();
   const { t } = useTranslation();
 
-  // O(1) lookup instead of O(n) Array.find()
-  const startTable = tablesMap.get(data.startTableId);
-  const endTable = tablesMap.get(data.endTableId);
+  // Only extract the two tables this relationship cares about
+  const startTable = useMemo(
+    () => tables.find((t) => t.id === data.startTableId),
+    [tables, data.startTableId],
+  );
+  const endTable = useMemo(
+    () => tables.find((t) => t.id === data.endTableId),
+    [tables, data.endTableId],
+  );
 
   const pathValues = useMemo(() => {
     if (!startTable || !endTable || startTable.hidden || endTable.hidden)
@@ -36,16 +42,22 @@ function Relationship({ data }) {
       endTable: { x: endTable.x, y: endTable.y, comment: endTable.comment },
     };
   }, [
-    startTable?.x, startTable?.y, startTable?.hidden, startTable?.comment,
-    startTable?.fields, endTable?.x, endTable?.y, endTable?.hidden,
-    endTable?.comment, endTable?.fields, data.startFieldId, data.endFieldId,
+    startTable?.x,
+    startTable?.y,
+    startTable?.hidden,
+    startTable?.comment,
+    startTable?.fields,
+    endTable?.x,
+    endTable?.y,
+    endTable?.hidden,
+    endTable?.comment,
+    endTable?.fields,
+    data.startFieldId,
+    data.endFieldId,
   ]);
 
   const pathRef = useRef();
   const labelRef = useRef();
-
-  // Cache getBBox results to avoid forced reflow during render
-  const [labelDims, setLabelDims] = useState({ width: 0, height: 0 });
 
   let cardinalityStart = "one";
   let cardinalityEnd = "one";
@@ -82,6 +94,9 @@ function Relationship({ data }) {
   let labelX = 0;
   let labelY = 0;
 
+  let labelWidth = labelRef.current?.getBBox().width ?? 0;
+  let labelHeight = labelRef.current?.getBBox().height ?? 0;
+
   const cardinalityOffset = 28;
 
   if (pathRef.current) {
@@ -89,8 +104,8 @@ function Relationship({ data }) {
     const tangentSample = Math.min(10, Math.max(pathLength / 6, 2));
 
     const labelPoint = pathRef.current.getPointAtLength(pathLength / 2);
-    labelX = labelPoint.x - labelDims.width / 2;
-    labelY = labelPoint.y + labelDims.height / 2;
+    labelX = labelPoint.x - (labelWidth ?? 0) / 2;
+    labelY = labelPoint.y + (labelHeight ?? 0) / 2;
 
     const startLen = Math.min(cardinalityOffset, pathLength);
     const endLen = Math.max(pathLength - cardinalityOffset, 0);
@@ -115,23 +130,6 @@ function Relationship({ data }) {
     cardinalityEndDx = point2.x - endPrev.x;
     cardinalityEndDy = point2.y - endPrev.y;
   }
-
-  // Measure label dimensions in layout effect instead of during render
-  useLayoutEffect(() => {
-    if (labelRef.current) {
-      try {
-        const bbox = labelRef.current.getBBox();
-        setLabelDims((prev) => {
-          if (prev.width !== bbox.width || prev.height !== bbox.height) {
-            return { width: bbox.width, height: bbox.height };
-          }
-          return prev;
-        });
-      } catch {
-        // getBBox can throw if element is not rendered
-      }
-    }
-  });
 
   const edit = useCallback(() => {
     if (!layout.sidebar) {
@@ -245,7 +243,14 @@ function Relationship({ data }) {
 const MemoizedRelationship = memo(Relationship);
 export default MemoizedRelationship;
 
-const CardinalityGlyph = memo(function CardinalityGlyph({ x, y, kind, dx, dy, darkMode }) {
+const CardinalityGlyph = memo(function CardinalityGlyph({
+  x,
+  y,
+  kind,
+  dx,
+  dy,
+  darkMode,
+}) {
   const stroke = darkMode ? "#cbd5e1" : "#1f2937";
   const vectorLength = Math.hypot(dx, dy) || 1;
   const nx = dx / vectorLength;
@@ -312,4 +317,3 @@ const CardinalityGlyph = memo(function CardinalityGlyph({ x, y, kind, dx, dy, da
     </g>
   );
 });
-

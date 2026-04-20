@@ -1,6 +1,6 @@
 import { Toast } from "@douyinfe/semi-ui";
 import { nanoid } from "nanoid";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useEventListener } from "usehooks-ts";
 import {
@@ -44,7 +44,7 @@ export default function Canvas() {
     pointer,
   } = canvasContextValue;
 
-  const { tables, updateTable, relationships, addRelationship, database, tablesMap } =
+  const { tables, updateTable, relationships, addRelationship, database } =
     useDiagram();
   const { setSaveState } = useSaveState();
   const { areas, updateArea } = useAreas();
@@ -104,43 +104,6 @@ export default function Canvas() {
   // this is used to store the element that is clicked on
   // at the moment, and shouldn't be a part of the state
   let elementPointerDown = null;
-
-  // RAF ref for throttling pointer move updates
-  const rafRef = useRef(null);
-
-  // Viewport culling: only render elements visible in the current viewBox
-  const viewportMargin = 200; // extra margin to avoid popping
-  const visibleTables = useMemo(() => {
-    if (!viewBox || tables.length < 30) return tables; // skip culling for small diagrams
-    const vbLeft = viewBox.left - viewportMargin;
-    const vbTop = viewBox.top - viewportMargin;
-    const vbRight = viewBox.left + viewBox.width + viewportMargin;
-    const vbBottom = viewBox.top + viewBox.height + viewportMargin;
-    return tables.filter((table) => {
-      const th = getTableHeight(table, settings.tableWidth, settings.showComments);
-      return (
-        table.x + settings.tableWidth >= vbLeft &&
-        table.x <= vbRight &&
-        table.y + th >= vbTop &&
-        table.y <= vbBottom
-      );
-    });
-  }, [tables, viewBox?.left, viewBox?.top, viewBox?.width, viewBox?.height, settings.tableWidth, settings.showComments]);
-
-  // Build a set of visible table IDs for relationship culling
-  const visibleTableIds = useMemo(() => {
-    if (!viewBox || tables.length < 30) return null; // null means show all
-    const set = new Set();
-    visibleTables.forEach((t) => set.add(t.id));
-    return set;
-  }, [visibleTables, viewBox, tables.length]);
-
-  const visibleRelationships = useMemo(() => {
-    if (!visibleTableIds) return relationships; // show all for small diagrams
-    return relationships.filter(
-      (r) => visibleTableIds.has(r.startTableId) || visibleTableIds.has(r.endTableId),
-    );
-  }, [relationships, visibleTableIds]);
 
   const isSameElement = (el1, el2) => {
     return el1.id === el2.id && el1.type === el2.type;
@@ -316,9 +279,9 @@ export default function Canvas() {
   };
 
   /**
-   * Core pointer move logic — extracted so RAF can call it
+   * @param {PointerEvent} e
    */
-  const processPointerMove = (e) => {
+  const handlePointerMove = (e) => {
     if (selectedElement.open && !layout.sidebar) return;
 
     if (!e.isPrimary) return;
@@ -446,21 +409,6 @@ export default function Canvas() {
         y2: pointer.spaces.diagram.y,
       }));
     }
-  };
-
-  /**
-   * @param {PointerEvent} e
-   * Throttled with requestAnimationFrame to cap updates at ~60fps
-   */
-  const handlePointerMove = (e) => {
-    // Cancel any pending RAF to avoid stacking
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-    }
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      processPointerMove(e);
-    });
   };
 
   /**
@@ -800,10 +748,10 @@ export default function Canvas() {
               }}
             />
           ))}
-          {visibleRelationships.map((e) => (
+          {relationships.map((e) => (
             <Relationship key={e.id} data={e} />
           ))}
-          {visibleTables.map((table) => (
+          {tables.map((table) => (
             <Table
               key={table.id}
               tableData={table}
