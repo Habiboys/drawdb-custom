@@ -1,16 +1,21 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { useLayoutEffect } from "react";
-import Editor from "./pages/Editor";
-import BugReport from "./pages/BugReport";
-import Templates from "./pages/Templates";
-import LandingPage from "./pages/LandingPage";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import SettingsContextProvider from "./context/SettingsContext";
+import BugReport from "./pages/BugReport";
+import Editor from "./pages/Editor";
+import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
+import Templates from "./pages/Templates";
 
 export default function App() {
   return (
     <SettingsContextProvider>
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <RestoreScroll />
         <Routes>
           <Route path="/" element={<LandingPage />} />

@@ -125,7 +125,7 @@ export default function Share({ title, setModal }) {
     <div>
       {error && (
         <Banner
-          description={t("oops_smth_went_wrong")}
+          description={error?.message || t("oops_smth_went_wrong")}
           type="danger"
           closeIcon={null}
           fullMode={false}

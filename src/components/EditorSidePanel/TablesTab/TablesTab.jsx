@@ -1,32 +1,87 @@
-import { Collapse, Button } from "@douyinfe/semi-ui";
-import { IconEyeOpened, IconEyeClosed } from "@douyinfe/semi-icons";
-import { IconPlus } from "@douyinfe/semi-icons";
+import { IconEyeClosed, IconEyeOpened, IconPlus } from "@douyinfe/semi-icons";
+import { Button, Collapse } from "@douyinfe/semi-ui";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Action, ObjectType, State } from "../../../data/constants";
 import {
-  useSelect,
+  useAreas,
   useDiagram,
-  useSaveState,
   useLayout,
+  useSaveState,
+  useSelect,
+  useSettings,
   useUndoRedo,
 } from "../../../hooks";
-import { Action, ObjectType, State } from "../../../data/constants";
-import { useTranslation } from "react-i18next";
 import { DragHandle } from "../../SortableList/DragHandle";
 import { SortableList } from "../../SortableList/SortableList";
-import SearchBar from "./SearchBar";
 import Empty from "../Empty";
+import SearchBar from "./SearchBar";
 import TableInfo from "./TableInfo";
 
 export default function TablesTab() {
   const { tables, addTable, setTables } = useDiagram();
+  const { areas } = useAreas();
+  const { settings } = useSettings();
   const { selectedElement, setSelectedElement } = useSelect();
   const { t } = useTranslation();
   const { layout } = useLayout();
   const { setSaveState } = useSaveState();
+  const [groupByArea, setGroupByArea] = useState(false);
+
+  const groupedTables = useMemo(() => {
+    const groups = areas.map((area) => ({ ...area, tables: [] }));
+    const ungrouped = [];
+
+    for (const table of tables) {
+      const centerX = table.x + settings.tableWidth / 2;
+      const centerY = table.y + 20;
+
+      const containerArea = groups.find(
+        (area) =>
+          centerX >= area.x &&
+          centerX <= area.x + area.width &&
+          centerY >= area.y &&
+          centerY <= area.y + area.height,
+      );
+
+      if (containerArea) {
+        containerArea.tables.push(table);
+      } else {
+        ungrouped.push(table);
+      }
+    }
+
+    return {
+      groups: groups.filter((group) => group.tables.length > 0),
+      ungrouped,
+    };
+  }, [areas, settings.tableWidth, tables]);
+
+  const activeCollapseKey =
+    selectedElement.open && selectedElement.element === ObjectType.TABLE
+      ? `${selectedElement.id}`
+      : "";
+
+  const handleCollapseChange = (k) => {
+    setSelectedElement((prev) => ({
+      ...prev,
+      open: true,
+      id: k[0],
+      element: ObjectType.TABLE,
+    }));
+  };
 
   return (
     <>
       <div className="flex gap-2">
         <SearchBar tables={tables} />
+        <Button
+          theme={groupByArea ? "solid" : "light"}
+          onClick={() => setGroupByArea((prev) => !prev)}
+          disabled={areas.length === 0}
+        >
+          {t("group_by_area", { defaultValue: "Group by area" })}
+        </Button>
         <div>
           <Button
             block
@@ -40,23 +95,53 @@ export default function TablesTab() {
       </div>
       {tables.length === 0 ? (
         <Empty title={t("no_tables")} text={t("no_tables_text")} />
+      ) : groupByArea && areas.length > 0 ? (
+        <div className="mt-2">
+          {groupedTables.groups.map((area) => (
+            <div key={area.id} className="mb-3">
+              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                {area.name} ({area.tables.length})
+              </div>
+              <Collapse
+                activeKey={activeCollapseKey}
+                keepDOM={false}
+                lazyRender
+                onChange={handleCollapseChange}
+                accordion
+              >
+                {area.tables.map((item) => (
+                  <TableListItem key={item.id} table={item} />
+                ))}
+              </Collapse>
+            </div>
+          ))}
+
+          {groupedTables.ungrouped.length > 0 && (
+            <div className="mb-2">
+              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                {t("ungrouped", { defaultValue: "Ungrouped" })} (
+                {groupedTables.ungrouped.length})
+              </div>
+              <Collapse
+                activeKey={activeCollapseKey}
+                keepDOM={false}
+                lazyRender
+                onChange={handleCollapseChange}
+                accordion
+              >
+                {groupedTables.ungrouped.map((item) => (
+                  <TableListItem key={item.id} table={item} />
+                ))}
+              </Collapse>
+            </div>
+          )}
+        </div>
       ) : (
         <Collapse
-          activeKey={
-            selectedElement.open && selectedElement.element === ObjectType.TABLE
-              ? `${selectedElement.id}`
-              : ""
-          }
+          activeKey={activeCollapseKey}
           keepDOM={false}
           lazyRender
-          onChange={(k) =>
-            setSelectedElement((prev) => ({
-              ...prev,
-              open: true,
-              id: k[0],
-              element: ObjectType.TABLE,
-            }))
-          }
+          onChange={handleCollapseChange}
           accordion
         >
           <SortableList

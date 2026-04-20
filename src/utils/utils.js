@@ -62,8 +62,14 @@ export function areFieldsCompatible(db, field1Type, field2Type) {
   return same || isCompatible;
 }
 
+const commentHeightCache = new Map();
+
 export function getCommentHeight(comment, containerWidth, showComments = true) {
   if (!comment || !showComments) return 0;
+
+  const cacheKey = `${comment}|${containerWidth}`;
+  const cached = commentHeightCache.get(cacheKey);
+  if (cached !== undefined) return cached;
 
   const paddingBottom = 12;
   const borders = 4;
@@ -79,7 +85,20 @@ export function getCommentHeight(comment, containerWidth, showComments = true) {
   const height = span.offsetHeight;
   document.body.removeChild(span);
 
-  return height + paddingBottom;
+  const result = height + paddingBottom;
+  commentHeightCache.set(cacheKey, result);
+
+  // Prevent unbounded cache growth
+  if (commentHeightCache.size > 500) {
+    const firstKey = commentHeightCache.keys().next().value;
+    commentHeightCache.delete(firstKey);
+  }
+
+  return result;
+}
+
+export function clearCommentHeightCache() {
+  commentHeightCache.clear();
 }
 
 export function getTableHeight(table, width, showComments = true) {

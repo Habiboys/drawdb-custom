@@ -1,5 +1,5 @@
 import { SideSheet } from "@douyinfe/semi-ui";
-import { useMemo, useRef } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Cardinality, ObjectType, Tab } from "../../data/constants";
 import { useDiagram, useLayout, useSelect, useSettings } from "../../hooks";
@@ -8,17 +8,18 @@ import RelationshipInfo from "../EditorSidePanel/RelationshipsTab/RelationshipIn
 
 const labelFontSize = 16;
 
-export default function Relationship({ data }) {
+function Relationship({ data }) {
   const { settings } = useSettings();
-  const { tables } = useDiagram();
+  const { tablesMap } = useDiagram();
   const { layout } = useLayout();
   const { selectedElement, setSelectedElement } = useSelect();
   const { t } = useTranslation();
 
-  const pathValues = useMemo(() => {
-    const startTable = tables.find((t) => t.id === data.startTableId);
-    const endTable = tables.find((t) => t.id === data.endTableId);
+  // O(1) lookup instead of O(n) Array.find()
+  const startTable = tablesMap.get(data.startTableId);
+  const endTable = tablesMap.get(data.endTableId);
 
+  const pathValues = useMemo(() => {
     if (!startTable || !endTable || startTable.hidden || endTable.hidden)
       return null;
 
@@ -34,10 +35,17 @@ export default function Relationship({ data }) {
       },
       endTable: { x: endTable.x, y: endTable.y, comment: endTable.comment },
     };
-  }, [tables, data]);
+  }, [
+    startTable?.x, startTable?.y, startTable?.hidden, startTable?.comment,
+    startTable?.fields, endTable?.x, endTable?.y, endTable?.hidden,
+    endTable?.comment, endTable?.fields, data.startFieldId, data.endFieldId,
+  ]);
 
   const pathRef = useRef();
   const labelRef = useRef();
+
+  // Cache getBBox results to avoid forced reflow during render
+  const [labelDims, setLabelDims] = useState({ width: 0, height: 0 });
 
   let cardinalityStart = "one";
   let cardinalityEnd = "one";
@@ -74,9 +82,6 @@ export default function Relationship({ data }) {
   let labelX = 0;
   let labelY = 0;
 
-  let labelWidth = labelRef.current?.getBBox().width ?? 0;
-  let labelHeight = labelRef.current?.getBBox().height ?? 0;
-
   const cardinalityOffset = 28;
 
   if (pathRef.current) {
@@ -84,8 +89,8 @@ export default function Relationship({ data }) {
     const tangentSample = Math.min(10, Math.max(pathLength / 6, 2));
 
     const labelPoint = pathRef.current.getPointAtLength(pathLength / 2);
-    labelX = labelPoint.x - (labelWidth ?? 0) / 2;
-    labelY = labelPoint.y + (labelHeight ?? 0) / 2;
+    labelX = labelPoint.x - labelDims.width / 2;
+    labelY = labelPoint.y + labelDims.height / 2;
 
     const startLen = Math.min(cardinalityOffset, pathLength);
     const endLen = Math.max(pathLength - cardinalityOffset, 0);
@@ -111,7 +116,24 @@ export default function Relationship({ data }) {
     cardinalityEndDy = point2.y - endPrev.y;
   }
 
-  const edit = () => {
+  // Measure label dimensions in layout effect instead of during render
+  useLayoutEffect(() => {
+    if (labelRef.current) {
+      try {
+        const bbox = labelRef.current.getBBox();
+        setLabelDims((prev) => {
+          if (prev.width !== bbox.width || prev.height !== bbox.height) {
+            return { width: bbox.width, height: bbox.height };
+          }
+          return prev;
+        });
+      } catch {
+        // getBBox can throw if element is not rendered
+      }
+    }
+  });
+
+  const edit = useCallback(() => {
     if (!layout.sidebar) {
       setSelectedElement((prev) => ({
         ...prev,
@@ -132,21 +154,23 @@ export default function Relationship({ data }) {
         .getElementById(`scroll_ref_${data.id}`)
         .scrollIntoView({ behavior: "smooth" });
     }
-  };
+  }, [layout.sidebar, data.id, selectedElement.currentTab, setSelectedElement]);
 
   if (!pathValues) return null;
+
+  const pathD = calcPath(
+    pathValues,
+    settings.tableWidth,
+    1,
+    settings.showComments,
+  );
 
   return (
     <>
       <g className="select-none group" onDoubleClick={edit}>
         {/* invisible wider path for better hover ux */}
         <path
-          d={calcPath(
-            pathValues,
-            settings.tableWidth,
-            1,
-            settings.showComments,
-          )}
+          d={pathD}
           fill="none"
           stroke="transparent"
           strokeWidth={12}
@@ -154,12 +178,7 @@ export default function Relationship({ data }) {
         />
         <path
           ref={pathRef}
-          d={calcPath(
-            pathValues,
-            settings.tableWidth,
-            1,
-            settings.showComments,
-          )}
+          d={pathD}
           className="relationship-path-modern"
           fill="none"
           cursor="pointer"
@@ -223,7 +242,10 @@ export default function Relationship({ data }) {
   );
 }
 
-function CardinalityGlyph({ x, y, kind, dx, dy, darkMode }) {
+const MemoizedRelationship = memo(Relationship);
+export default MemoizedRelationship;
+
+const CardinalityGlyph = memo(function CardinalityGlyph({ x, y, kind, dx, dy, darkMode }) {
   const stroke = darkMode ? "#cbd5e1" : "#1f2937";
   const vectorLength = Math.hypot(dx, dy) || 1;
   const nx = dx / vectorLength;
@@ -289,4 +311,5 @@ function CardinalityGlyph({ x, y, kind, dx, dy, darkMode }) {
       />
     </g>
   );
-}
+});
+

@@ -8,7 +8,7 @@ import {
   IconUnlock,
 } from "@douyinfe/semi-icons";
 import { Button, Popover, SideSheet, Tag } from "@douyinfe/semi-ui";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ObjectType,
@@ -24,7 +24,7 @@ import { resolveType } from "../../utils/customTypes";
 import { getCommentHeight, getTableHeight } from "../../utils/utils";
 import TableInfo from "../EditorSidePanel/TablesTab/TableInfo";
 
-export default function Table({
+function Table({
   tableData,
   onPointerDown,
   setHoveredTable,
@@ -32,7 +32,7 @@ export default function Table({
   setLinkingLine,
 }) {
   const [hoveredField, setHoveredField] = useState(null);
-  const { tables, database, deleteTable, deleteField, updateTable } =
+  const { tablesCount, database, deleteTable, deleteField, updateTable } =
     useDiagram();
   const { layout } = useLayout();
   const { settings } = useSettings();
@@ -54,7 +54,7 @@ export default function Table({
       ? "bg-zinc-100 text-zinc-800"
       : "bg-zinc-900 text-zinc-100";
 
-  const isLargeDiagram = tables.length >= 50;
+  const isLargeDiagram = tablesCount >= 50;
 
   const tableDepthClass = isLargeDiagram
     ? ""
@@ -306,9 +306,10 @@ export default function Table({
 
           {tableData.fields.map((e, i) => {
             const resolved = resolveType(database, e.type);
+            const fieldKey = e.id ?? `${tableData.id}-${i}`;
             return showFieldSummaryPopover ? (
               <Popover
-                key={i}
+                key={fieldKey}
                 content={
                   <div className="popover-theme">
                     <div
@@ -364,10 +365,10 @@ export default function Table({
                     : { direction: "ltr" }
                 }
               >
-                {field(e, i)}
+                {field(e, i, fieldKey)}
               </Popover>
             ) : (
-              field(e, i)
+              field(e, i, fieldKey)
             );
           })}
         </div>
@@ -396,10 +397,11 @@ export default function Table({
     </>
   );
 
-  function field(fieldData, index) {
+  function field(fieldData, index, key) {
     const fieldResolved = resolveType(database, fieldData.type);
     return (
       <div
+        key={key}
         className={`${
           index === tableData.fields.length - 1
             ? ""
@@ -494,7 +496,6 @@ export default function Table({
           ) : settings.showDataTypes ? (
             <div className="flex gap-1 items-center">
               {fieldData.primary && <IconKeyStroked />}
-              {!fieldData.notNull && <span className="font-mono">?</span>}
               <span className={`font-mono ${dataTypeTextClass}`}>
                 {fieldData.type +
                   ((fieldResolved.isSized || fieldResolved.hasPrecision) &&
@@ -510,3 +511,14 @@ export default function Table({
     );
   }
 }
+
+export default memo(Table, (prevProps, nextProps) => {
+  // Custom comparison: only re-render if our specific tableData changed
+  if (prevProps.tableData !== nextProps.tableData) return false;
+  // Functions are stable thanks to useCallback in parent/context
+  if (prevProps.onPointerDown !== nextProps.onPointerDown) return false;
+  if (prevProps.setHoveredTable !== nextProps.setHoveredTable) return false;
+  if (prevProps.handleGripField !== nextProps.handleGripField) return false;
+  if (prevProps.setLinkingLine !== nextProps.setLinkingLine) return false;
+  return true;
+});

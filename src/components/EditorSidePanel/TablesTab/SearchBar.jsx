@@ -1,46 +1,61 @@
-import { useMemo } from "react";
-import { useSelect } from "../../../hooks";
-import { TreeSelect } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
-import { ObjectType } from "../../../data/constants";
+import { AutoComplete } from "@douyinfe/semi-ui";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ObjectType } from "../../../data/constants";
+import { useSelect } from "../../../hooks";
 
 export default function SearchBar({ tables }) {
   const { setSelectedElement } = useSelect();
   const { t } = useTranslation();
+  const [searchText, setSearchText] = useState("");
 
-  const treeData = useMemo(() => {
-    return tables.map(({ id, name: parentName, fields }, i) => {
-      const children = fields?.map(({ name }, j) => ({
-        tableId: id,
-        id: `${j}`,
+  const searchableItems = useMemo(() => {
+    return tables.flatMap(({ id, name, fields = [] }) => [
+      {
         label: name,
-        value: name,
-        key: `${i}-${j}`,
-      }));
-
-      return {
         tableId: id,
-        id: `${i}`,
-        label: parentName,
-        value: parentName,
-        key: `${i}`,
-        children,
-      };
-    });
+        fieldIndex: null,
+      },
+      ...fields.map((field, index) => ({
+        label: `${name}.${field.name}`,
+        tableId: id,
+        fieldIndex: index,
+      })),
+    ]);
   }, [tables]);
 
+  const [filteredResult, setFilteredResult] = useState(
+    searchableItems.map((item) => item.label),
+  );
+
+  useEffect(() => {
+    setFilteredResult(searchableItems.map((item) => item.label));
+  }, [searchableItems]);
+
+  const handleStringSearch = (value) => {
+    const searchValue = value.toLowerCase();
+    setFilteredResult(
+      searchableItems
+        .map((item) => item.label)
+        .filter((itemLabel) => itemLabel.toLowerCase().includes(searchValue)),
+    );
+  };
+
   return (
-    <TreeSelect
-      searchPosition="trigger"
-      dropdownStyle={{ maxHeight: 400, overflow: "auto" }}
-      treeData={treeData}
+    <AutoComplete
+      data={filteredResult}
+      value={searchText}
+      showClear
       prefix={<IconSearch />}
       emptyContent={<div className="p-3 popover-theme">{t("not_found")}</div>}
-      filterTreeNode
       placeholder={t("search")}
-      onChange={(node) => {
-        const { tableId, id, children } = node;
+      onSearch={handleStringSearch}
+      onChange={(v) => setSearchText(v)}
+      onSelect={(value) => {
+        const found = searchableItems.find((item) => item.label === value);
+        if (!found) return;
+        const { tableId, fieldIndex } = found;
 
         setSelectedElement((prev) => ({
           ...prev,
@@ -52,13 +67,12 @@ export default function SearchBar({ tables }) {
           .getElementById(`scroll_table_${tableId}`)
           .scrollIntoView({ behavior: "smooth" });
 
-        if (!children) {
+        if (fieldIndex !== null) {
           document
-            .getElementById(`scroll_table_${tableId}_input_${id}`)
-            .focus();
+            .getElementById(`scroll_table_${tableId}_input_${fieldIndex}`)
+            ?.focus();
         }
       }}
-      onChangeWithObject
       className="w-full"
     />
   );

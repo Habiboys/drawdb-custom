@@ -4,9 +4,18 @@ export const SHARE_FILENAME = "share.json";
 export const VERSION_FILENAME = "versionned.json";
 
 const description = "drawDB diagram";
-const baseUrl = import.meta.env.VITE_BACKEND_URL;
+const baseUrl = (import.meta.env.VITE_BACKEND_URL || "").replace(/\/+$/, "");
+
+function ensureBackendUrl() {
+  if (!baseUrl) {
+    throw new Error(
+      "Sharing backend is not configured. Set VITE_BACKEND_URL in frontend/.env.",
+    );
+  }
+}
 
 export async function create(filename, content) {
+  ensureBackendUrl();
   const res = await axios.post(`${baseUrl}/gists`, {
     public: false,
     filename,
@@ -18,6 +27,7 @@ export async function create(filename, content) {
 }
 
 export async function patch(gistId, filename, content) {
+  ensureBackendUrl();
   const { data } = await axios.patch(`${baseUrl}/gists/${gistId}`, {
     filename,
     content,
@@ -27,16 +37,19 @@ export async function patch(gistId, filename, content) {
 }
 
 export async function del(gistId) {
+  ensureBackendUrl();
   await axios.delete(`${baseUrl}/gists/${gistId}`);
 }
 
 export async function get(gistId) {
+  ensureBackendUrl();
   const res = await axios.get(`${baseUrl}/gists/${gistId}`);
 
   return res.data;
 }
 
 export async function getCommits(gistId, perPage = 20, page = 1) {
+  ensureBackendUrl();
   const res = await axios.get(`${baseUrl}/gists/${gistId}/commits`, {
     params: {
       per_page: perPage,
@@ -48,6 +61,7 @@ export async function getCommits(gistId, perPage = 20, page = 1) {
 }
 
 export async function getVersion(gistId, sha) {
+  ensureBackendUrl();
   const res = await axios.get(`${baseUrl}/gists/${gistId}/${sha}`);
 
   return res.data;
@@ -59,6 +73,7 @@ export async function getCommitsWithFile(
   limit = 10,
   cursor = null,
 ) {
+  ensureBackendUrl();
   const res = await axios.get(
     `${baseUrl}/gists/${gistId}/file-versions/${file}`,
     {
@@ -73,6 +88,7 @@ export async function getCommitsWithFile(
 }
 
 export async function compare(gistId, file, versionA, versionB) {
+  ensureBackendUrl();
   const res = await axios.get(
     `${baseUrl}/gists/${gistId}/file/${file}/compare/${versionA}/${versionB}`,
   );

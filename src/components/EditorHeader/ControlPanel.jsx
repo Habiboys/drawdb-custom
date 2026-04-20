@@ -22,7 +22,6 @@ import {
   Tooltip,
 } from "@douyinfe/semi-ui";
 import { useLiveQuery } from "dexie-react-hooks";
-import { toJpeg, toPng, toSvg } from "html-to-image";
 import { Validator } from "jsonschema";
 import jsPDF from "jspdf";
 import { DateTime } from "luxon";
@@ -31,10 +30,12 @@ import { useContext, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useTranslation } from "react-i18next";
 import { Link, useMatch, useNavigate, useParams } from "react-router-dom";
+import { exportImageFromSvg } from "../../api/exportImage";
 import icon from "../../assets/icon_dark_64.png";
 import { IdContext } from "../../context/IdContext";
 import {
   Action,
+  darkBgTheme,
   DB,
   IMPORT_FROM,
   MODAL,
@@ -494,19 +495,243 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
     }));
   };
   const copyAsImage = () => {
-    toPng(document.getElementById("canvas"), {
-      pixelRatio: pngExportPixelRatio,
-    }).then(function (dataUrl) {
-      const blob = dataURItoBlob(dataUrl);
-      navigator.clipboard
-        .write([new ClipboardItem({ "image/png": blob })])
-        .then(() => {
-          Toast.success(t("copied_to_clipboard"));
-        })
-        .catch(() => {
-          Toast.error(t("oops_smth_went_wrong"));
-        });
+    exportRasterFromDiagram("png")
+      .then((dataUrl) => {
+        const blob = dataURItoBlob(dataUrl);
+        navigator.clipboard
+          .write([new ClipboardItem({ "image/png": blob })])
+          .then(() => {
+            Toast.success(t("copied_to_clipboard"));
+          })
+          .catch(() => {
+            Toast.error(t("oops_smth_went_wrong"));
+          });
+      })
+      .catch(() => {
+        Toast.error(t("oops_smth_went_wrong"));
+      });
+  };
+
+  const getDiagramBounds = () => {
+    const minMaxXY = {
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
+    };
+
+    tables.forEach((table) => {
+      minMaxXY.minX = Math.min(minMaxXY.minX, table.x);
+      minMaxXY.minY = Math.min(minMaxXY.minY, table.y);
+      minMaxXY.maxX = Math.max(minMaxXY.maxX, table.x + settings.tableWidth);
+      minMaxXY.maxY = Math.max(
+        minMaxXY.maxY,
+        table.y +
+          getTableHeight(table, settings.tableWidth, settings.showComments),
+      );
     });
+
+    areas.forEach((area) => {
+      minMaxXY.minX = Math.min(minMaxXY.minX, area.x);
+      minMaxXY.minY = Math.min(minMaxXY.minY, area.y);
+      minMaxXY.maxX = Math.max(minMaxXY.maxX, area.x + area.width);
+      minMaxXY.maxY = Math.max(minMaxXY.maxY, area.y + area.height);
+    });
+
+    notes.forEach((note) => {
+      minMaxXY.minX = Math.min(minMaxXY.minX, note.x);
+      minMaxXY.minY = Math.min(minMaxXY.minY, note.y);
+      minMaxXY.maxX = Math.max(
+        minMaxXY.maxX,
+        note.x + (note.width ?? noteWidth),
+      );
+      minMaxXY.maxY = Math.max(minMaxXY.maxY, note.y + note.height);
+    });
+
+    if (!Number.isFinite(minMaxXY.minX)) {
+      const canvas = document.getElementById("canvas")?.getBoundingClientRect();
+      return {
+        minX: 0,
+        minY: 0,
+        width: Math.max(1, Math.floor(canvas?.width ?? 1200)),
+        height: Math.max(1, Math.floor(canvas?.height ?? 800)),
+      };
+    }
+
+    const padding = 64;
+    const minX = minMaxXY.minX - padding;
+    const minY = minMaxXY.minY - padding;
+    const width = Math.max(
+      1,
+      Math.ceil(minMaxXY.maxX - minMaxXY.minX + padding * 2),
+    );
+    const height = Math.max(
+      1,
+      Math.ceil(minMaxXY.maxY - minMaxXY.minY + padding * 2),
+    );
+
+    return { minX, minY, width, height };
+  };
+
+  const getExportPixelRatio = (bounds) => {
+    const area = bounds.width * bounds.height;
+
+    if (tables.length >= 80 || area > 20_000_000) return 1;
+    if (tables.length >= 50 || area > 10_000_000) return 1.5;
+    if (tables.length >= 25 || area > 5_000_000) return 2;
+
+    return Math.min(3, pngExportPixelRatio);
+  };
+
+  const getSafeExportScale = (bounds, requestedRatio) => {
+    const MAX_EXPORT_EDGE = 8192;
+    const MAX_EXPORT_PIXELS = 32_000_000;
+
+    const edgeLimitedRatio = Math.min(
+      requestedRatio,
+      MAX_EXPORT_EDGE / Math.max(1, bounds.width),
+      MAX_EXPORT_EDGE / Math.max(1, bounds.height),
+    );
+
+    const pixelsAtEdgeRatio =
+      bounds.width * bounds.height * edgeLimitedRatio * edgeLimitedRatio;
+    if (pixelsAtEdgeRatio <= MAX_EXPORT_PIXELS) {
+      return Math.max(0.5, edgeLimitedRatio);
+    }
+
+    const pixelLimitedRatio = Math.sqrt(
+      MAX_EXPORT_PIXELS / Math.max(1, bounds.width * bounds.height),
+    );
+
+    return Math.max(0.5, Math.min(edgeLimitedRatio, pixelLimitedRatio));
+  };
+
+  const buildSvgForExport = () => {
+    const svg = document.getElementById("diagram");
+    if (!svg) throw new Error("Diagram not found");
+
+    const bounds = getDiagramBounds();
+    const clonedSvg = svg.cloneNode(true);
+
+    clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clonedSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    clonedSvg.setAttribute("width", String(bounds.width));
+    clonedSvg.setAttribute("height", String(bounds.height));
+    clonedSvg.setAttribute(
+      "viewBox",
+      `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`,
+    );
+
+    const background = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "rect",
+    );
+    background.setAttribute("x", String(bounds.minX));
+    background.setAttribute("y", String(bounds.minY));
+    background.setAttribute("width", String(bounds.width));
+    background.setAttribute("height", String(bounds.height));
+    background.setAttribute(
+      "fill",
+      settings.mode === "dark" ? darkBgTheme : "#ffffff",
+    );
+    clonedSvg.insertBefore(background, clonedSvg.firstChild);
+
+    // Inline stylesheets so exported SVG keeps visual styles outside the app.
+    try {
+      const styleTag = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "style",
+      );
+      let cssText = "";
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          const rules = sheet.cssRules;
+          if (!rules) continue;
+          for (const rule of Array.from(rules)) {
+            cssText += `${rule.cssText}\n`;
+          }
+        } catch {
+          // Ignore stylesheets that cannot be read (e.g., cross-origin)
+        }
+      }
+      if (cssText) {
+        styleTag.textContent = cssText;
+        clonedSvg.insertBefore(styleTag, clonedSvg.firstChild);
+      }
+    } catch {
+      // If style inlining fails, continue with best-effort export.
+    }
+
+    const serializer = new XMLSerializer();
+    return {
+      bounds,
+      svgString: serializer.serializeToString(clonedSvg),
+    };
+  };
+
+  const exportRasterFromDiagram = async (type = "png") => {
+    const { bounds, svgString } = buildSvgForExport();
+
+    try {
+      const responseFormat = type === "jpeg" ? "jpeg" : "png";
+      return await exportImageFromSvg({
+        svg: svgString,
+        format: responseFormat,
+        quality: 95,
+      });
+    } catch {
+      // fallback to local renderer when backend is not available
+    }
+
+    const pixelRatio = getSafeExportScale(bounds, getExportPixelRatio(bounds));
+    const svgBlob = new Blob([svgString], {
+      type: "image/svg+xml;charset=utf-8",
+    });
+    const svgUrl = URL.createObjectURL(svgBlob);
+
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => {
+          const fallback = new Image();
+          fallback.onload = () => resolve(fallback);
+          fallback.onerror = reject;
+          fallback.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`;
+        };
+        image.src = svgUrl;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.floor(bounds.width * pixelRatio));
+      canvas.height = Math.max(1, Math.floor(bounds.height * pixelRatio));
+
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas context unavailable");
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+
+      if (type === "jpeg") {
+        context.fillStyle = settings.mode === "dark" ? darkBgTheme : "#ffffff";
+        context.fillRect(0, 0, bounds.width, bounds.height);
+      }
+
+      context.drawImage(img, 0, 0, bounds.width, bounds.height);
+
+      if (type === "jpeg") {
+        return canvas.toDataURL("image/jpeg", 0.95);
+      }
+
+      return canvas.toDataURL("image/png");
+    } finally {
+      URL.revokeObjectURL(svgUrl);
+    }
+  };
+
+  const exportSvgFromDiagram = () => {
+    const { svgString } = buildSvgForExport();
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`;
   };
   const resetView = () =>
     setTransform((prev) => ({ ...prev, zoom: 1, pan: { x: 0, y: 0 } }));
@@ -1069,47 +1294,45 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
         children: [
           {
             name: "PNG",
-            function: () => {
-              toPng(document.getElementById("canvas"), {
-                pixelRatio: pngExportPixelRatio,
-              }).then(function (dataUrl) {
+            function: async () => {
+              try {
+                const dataUrl = await exportRasterFromDiagram("png");
                 setExportData((prev) => ({
                   ...prev,
                   data: dataUrl,
                   extension: "png",
                 }));
-              });
-              setModal(MODAL.IMG);
+                setModal(MODAL.IMG);
+              } catch {
+                Toast.error(t("oops_smth_went_wrong"));
+              }
             },
           },
           {
             name: "JPEG",
-            function: () => {
-              toJpeg(document.getElementById("canvas"), { quality: 0.95 }).then(
-                function (dataUrl) {
-                  setExportData((prev) => ({
-                    ...prev,
-                    data: dataUrl,
-                    extension: "jpeg",
-                  }));
-                },
-              );
-              setModal(MODAL.IMG);
+            function: async () => {
+              try {
+                const dataUrl = await exportRasterFromDiagram("jpeg");
+                setExportData((prev) => ({
+                  ...prev,
+                  data: dataUrl,
+                  extension: "jpeg",
+                }));
+                setModal(MODAL.IMG);
+              } catch {
+                Toast.error(t("oops_smth_went_wrong"));
+              }
             },
           },
           {
             name: "SVG",
             function: () => {
-              const filter = (node) => node.tagName !== "i";
-              toSvg(document.getElementById("canvas"), { filter: filter }).then(
-                function (dataUrl) {
-                  setExportData((prev) => ({
-                    ...prev,
-                    data: dataUrl,
-                    extension: "svg",
-                  }));
-                },
-              );
+              const dataUrl = exportSvgFromDiagram();
+              setExportData((prev) => ({
+                ...prev,
+                data: dataUrl,
+                extension: "svg",
+              }));
               setModal(MODAL.IMG);
             },
           },
@@ -1157,23 +1380,23 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
           },
           {
             name: "PDF",
-            function: () => {
-              const canvas = document.getElementById("canvas");
-              toJpeg(canvas).then(function (dataUrl) {
-                const doc = new jsPDF("l", "px", [
-                  canvas.offsetWidth,
-                  canvas.offsetHeight,
-                ]);
+            function: async () => {
+              try {
+                const bounds = getDiagramBounds();
+                const dataUrl = await exportRasterFromDiagram("jpeg");
+                const doc = new jsPDF("l", "px", [bounds.width, bounds.height]);
                 doc.addImage(
                   dataUrl,
                   "jpeg",
                   0,
                   0,
-                  canvas.offsetWidth,
-                  canvas.offsetHeight,
+                  bounds.width,
+                  bounds.height,
                 );
                 doc.save(`${exportData.filename}.pdf`);
-              });
+              } catch {
+                Toast.error(t("oops_smth_went_wrong"));
+              }
             },
           },
           {
