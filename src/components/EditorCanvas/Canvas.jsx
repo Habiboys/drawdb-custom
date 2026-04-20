@@ -683,7 +683,7 @@ export default function Canvas() {
     { passive: false },
   );
 
-  const canvasBackground = settings.mode === "dark" ? darkBgTheme : "#f8fafc";
+  const canvasBackground = settings.mode === "dark" ? darkBgTheme : "#ffffff";
   const gridDotColor = settings.mode === "dark" ? "#334155" : "#cbd5e1";
 
   return (

@@ -45,13 +45,13 @@ export default function Table({
   } = useSelect();
 
   const borderColor = useMemo(
-    () => (settings.mode === "light" ? "border-zinc-300" : "border-zinc-700"),
+    () => (settings.mode === "light" ? "border-zinc-400" : "border-zinc-700"),
     [settings.mode],
   );
 
   const tableThemeClass =
     settings.mode === "light"
-      ? "bg-white text-zinc-800"
+      ? "bg-zinc-100 text-zinc-800"
       : "bg-zinc-900 text-zinc-100";
 
   const isLargeDiagram = tables.length >= 50;
@@ -64,7 +64,7 @@ export default function Table({
 
   const tableHeaderClass =
     settings.mode === "light"
-      ? "border-zinc-200 bg-zinc-50"
+      ? "border-zinc-300 bg-zinc-200"
       : "border-zinc-700 bg-zinc-950";
 
   const tableFieldBorderClass =
@@ -435,7 +435,8 @@ export default function Table({
           } flex items-center gap-2 overflow-hidden`}
         >
           <button
-            className="h-[10px] w-[10px] shrink-0 rounded-full bg-slate-500 transition group-hover:bg-blue-500"
+            aria-label="Create relationship"
+            className="h-[16px] w-[2px] shrink-0 bg-transparent transition group-hover:bg-zinc-400"
             onPointerDown={(e) => {
               if (!e.isPrimary) return;
 
