@@ -155,7 +155,7 @@ export default function Area({
         onPointerDown={onPointerDown}
       >
         <div
-          className={`h-full w-full cursor-move rounded-xl border p-2.5 backdrop-blur-[1px] ${
+          className={`h-full w-full cursor-move rounded-xl border p-2.5 ${
             isHovered
               ? "border-blue-400"
               : isSelected
