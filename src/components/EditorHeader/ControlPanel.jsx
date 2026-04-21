@@ -479,6 +479,8 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
   const fileImport = () => setModal(MODAL.IMPORT);
   const viewGrid = () =>
     setSettings((prev) => ({ ...prev, showGrid: !prev.showGrid }));
+  const toggleHandTool = () =>
+    setSettings((prev) => ({ ...prev, handTool: !prev.handTool }));
   const snapToGrid = () =>
     setSettings((prev) => ({ ...prev, snapToGrid: !prev.snapToGrid }));
   const zoomIn = () =>
@@ -654,6 +656,19 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
           // Ignore stylesheets that cannot be read (e.g., cross-origin)
         }
       }
+
+      const computedFontFamily = window.getComputedStyle(document.body)
+        .fontFamily;
+      const exportFontFamily =
+        computedFontFamily && computedFontFamily.trim().length > 0
+          ? computedFontFamily
+          : '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+      cssText += `
+svg, text, tspan, foreignObject, foreignObject * {
+  font-family: ${exportFontFamily} !important;
+}
+`;
+
       if (cssText) {
         styleTag.textContent = cssText;
         clonedSvg.insertBefore(styleTag, clonedSvg.firstChild);
@@ -1622,6 +1637,15 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
         ),
         function: snapToGrid,
       },
+      hand_tool: {
+        state: settings.handTool ? (
+          <i className="bi bi-toggle-on" />
+        ) : (
+          <i className="bi bi-toggle-off" />
+        ),
+        function: toggleHandTool,
+        shortcut: "H",
+      },
       show_cardinality: {
         state: settings.showCardinality ? (
           <i className="bi bi-toggle-on" />
@@ -1787,6 +1811,7 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
   });
   useHotkeys("mod+alt+w", fitWindow, { preventDefault: true });
   useHotkeys("alt+e", toggleDBMLEditor, { preventDefault: true });
+  useHotkeys("h", toggleHandTool, { preventDefault: true });
 
   return (
     <>
@@ -1915,6 +1940,20 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
               }
             >
               <i className="fa-solid fa-magnifying-glass-plus" />
+            </button>
+          </Tooltip>
+          <Divider layout="vertical" margin="8px" />
+          <Tooltip
+            content={t("hand_tool", { defaultValue: "Hand tool (H)" })}
+            position="bottom"
+          >
+            <button
+              className={`-mt-0.5 rounded-none py-1 px-2 text-xl hover-2 ${
+                settings.handTool ? "text-blue-600" : ""
+              }`}
+              onClick={toggleHandTool}
+            >
+              <i className="bi bi-hand-index-thumb" />
             </button>
           </Tooltip>
           <Divider layout="vertical" margin="8px" />

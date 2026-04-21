@@ -1,5 +1,5 @@
 import { Toast } from "@douyinfe/semi-ui";
-import { createContext, useState } from "react";
+import { createContext, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Action, ObjectType, defaultBlue } from "../data/constants";
 import { useSelect, useTransform, useUndoRedo } from "../hooks";
@@ -13,11 +13,24 @@ export default function AreasContextProvider({ children }) {
   const { selectedElement, setSelectedElement } = useSelect();
   const { setUndoStack, setRedoStack } = useUndoRedo();
 
+  useEffect(() => {
+    setAreas((prev) => {
+      if (!prev.some((area) => !area.groupId)) return prev;
+      return prev.map((area) => ({
+        ...area,
+        groupId: area.groupId ?? crypto.randomUUID(),
+      }));
+    });
+  }, []);
+
   const addArea = (data, addToHistory = true) => {
     if (data) {
       setAreas((prev) => {
         const temp = prev.slice();
-        temp.splice(data.id, 0, data);
+        temp.splice(data.id, 0, {
+          ...data,
+          groupId: data.groupId ?? crypto.randomUUID(),
+        });
         return temp.map((t, i) => ({ ...t, id: i }));
       });
     } else {
@@ -27,6 +40,7 @@ export default function AreasContextProvider({ children }) {
         ...prev,
         {
           id: prev.length,
+          groupId: crypto.randomUUID(),
           name: `area_${prev.length}`,
           x: transform.pan.x - width / 2,
           y: transform.pan.y - height / 2,

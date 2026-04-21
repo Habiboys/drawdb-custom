@@ -1,11 +1,11 @@
 import { Image, Input, Modal as SemiUIModal, Spin } from "@douyinfe/semi-ui";
 import { saveAs } from "file-saver";
+import { nanoid } from "nanoid";
 import { Parser } from "node-sql-parser";
 import { Parser as OracleParser } from "oracle-sql-parser";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { nanoid } from "nanoid";
 import { DB, MODAL, STATUS } from "../../../data/constants";
 import { databases } from "../../../data/databases";
 import {
@@ -173,7 +173,11 @@ export default function Modal({
       const targetDatabase = database === DB.GENERIC ? importDb : database;
       const normalizedEnums = normalizeImportedEnums(diagramData.enums ?? []);
 
-      if (database === DB.GENERIC && targetDatabase && targetDatabase !== DB.GENERIC) {
+      if (
+        database === DB.GENERIC &&
+        targetDatabase &&
+        targetDatabase !== DB.GENERIC
+      ) {
         setDatabase(targetDatabase);
       }
 

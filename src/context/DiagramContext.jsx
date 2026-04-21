@@ -1,9 +1,9 @@
-import { createContext, useCallback, useMemo, useState } from "react";
-import { Action, DB, ObjectType, defaultBlue } from "../data/constants";
-import { useTransform, useUndoRedo, useSelect } from "../hooks";
 import { Toast } from "@douyinfe/semi-ui";
-import { useTranslation } from "react-i18next";
 import { nanoid } from "nanoid";
+import { createContext, useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Action, DB, ObjectType, defaultBlue } from "../data/constants";
+import { useSelect, useTransform, useUndoRedo } from "../hooks";
 
 export const DiagramContext = createContext(null);
 
@@ -31,6 +31,7 @@ export default function DiagramContextProvider({ children }) {
         name: `table_${id}`,
         x: transform.pan.x,
         y: transform.pan.y,
+        areaGroupId: null,
         locked: false,
         fields: [
           {
@@ -73,7 +74,15 @@ export default function DiagramContextProvider({ children }) {
         setRedoStack([]);
       }
     },
-    [database, transform.pan.x, transform.pan.y, tables.length, t, setUndoStack, setRedoStack],
+    [
+      database,
+      transform.pan.x,
+      transform.pan.y,
+      tables.length,
+      t,
+      setUndoStack,
+      setRedoStack,
+    ],
   );
 
   const deleteTable = useCallback(
@@ -318,4 +327,3 @@ export default function DiagramContextProvider({ children }) {
     </DiagramContext.Provider>
   );
 }
-

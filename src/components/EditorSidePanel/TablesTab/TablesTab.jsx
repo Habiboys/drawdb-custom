@@ -32,17 +32,26 @@ export default function TablesTab() {
     const groups = areas.map((area) => ({ ...area, tables: [] }));
     const ungrouped = [];
 
-    for (const table of tables) {
+    const getTableContainerArea = (table) => {
+      const assignedArea = groups.find(
+        (area) => area.groupId && area.groupId === table.areaGroupId,
+      );
+      if (assignedArea) return assignedArea;
+
       const centerX = table.x + settings.tableWidth / 2;
       const centerY = table.y + 20;
 
-      const containerArea = groups.find(
+      return groups.find(
         (area) =>
           centerX >= area.x &&
           centerX <= area.x + area.width &&
           centerY >= area.y &&
           centerY <= area.y + area.height,
       );
+    };
+
+    for (const table of tables) {
+      const containerArea = getTableContainerArea(table);
 
       if (containerArea) {
         containerArea.tables.push(table);

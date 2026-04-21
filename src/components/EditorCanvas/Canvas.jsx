@@ -1,6 +1,6 @@
 import { Toast } from "@douyinfe/semi-ui";
 import { nanoid } from "nanoid";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useEventListener } from "usehooks-ts";
 import {
@@ -105,8 +105,85 @@ export default function Canvas() {
   // at the moment, and shouldn't be a part of the state
   let elementPointerDown = null;
 
+  useEffect(() => {
+    if (!panning.isPanning) {
+      pointer.setStyle(settings.handTool ? "grab" : "default");
+    }
+  }, [settings.handTool, panning.isPanning, pointer]);
+
   const isSameElement = (el1, el2) => {
     return el1.id === el2.id && el1.type === el2.type;
+  };
+
+  const getAreaGroupKey = (area) => area.groupId ?? `legacy-${area.id}`;
+
+  const getContainerAreaByTableCoords = (x, y) => {
+    const centerX = x + settings.tableWidth / 2;
+    const centerY = y + 20;
+    return areas.find(
+      (area) =>
+        centerX >= area.x &&
+        centerX <= area.x + area.width &&
+        centerY >= area.y &&
+        centerY <= area.y + area.height,
+    );
+  };
+
+  const getContainerAreaByPositionForTable = (table) => {
+    return getContainerAreaByTableCoords(table.x, table.y);
+  };
+
+  const getContainerAreaForTable = (table) => {
+    if (table.areaGroupId) {
+      const assignedArea = areas.find(
+        (area) => getAreaGroupKey(area) === table.areaGroupId,
+      );
+      if (assignedArea) return assignedArea;
+    }
+    return getContainerAreaByPositionForTable(table);
+  };
+
+  const isTableInsideLockedArea = (table) => {
+    const containerArea = getContainerAreaForTable(table);
+    return Boolean(containerArea?.locked);
+  };
+
+  const isElementLockedForMovement = (element, type) => {
+    if (type === ObjectType.TABLE) {
+      return element.locked || isTableInsideLockedArea(element);
+    }
+    return element.locked;
+  };
+
+  const getTableBulkElement = (table) => ({
+    id: table.id,
+    type: ObjectType.TABLE,
+    currentCoords: { x: table.x, y: table.y },
+    initialCoords: { x: table.x, y: table.y },
+    currentAreaGroupId: table.areaGroupId ?? null,
+    initialAreaGroupId: table.areaGroupId ?? null,
+  });
+
+  const mergeBulkElements = (elements) => {
+    const merged = [];
+    elements.forEach((element) => {
+      if (!merged.some((el) => isSameElement(el, element))) {
+        merged.push(element);
+      }
+    });
+    return merged;
+  };
+
+  const getTablesInsideAreaAsBulkElements = (area) => {
+    const areaGroupKey = getAreaGroupKey(area);
+    return tables
+      .filter((table) => {
+        if (table.areaGroupId) {
+          return table.areaGroupId === areaGroupKey;
+        }
+        return getContainerAreaByPositionForTable(table)?.id === area.id;
+      })
+      .map(getTableBulkElement);
   };
 
   const collectSelectedElements = () => {
@@ -124,14 +201,9 @@ export default function Canvas() {
     };
 
     tables.forEach((table) => {
-      if (table.locked) return;
+      if (table.locked || isTableInsideLockedArea(table)) return;
 
-      const element = {
-        id: table.id,
-        type: ObjectType.TABLE,
-        currentCoords: { x: table.x, y: table.y },
-        initialCoords: { x: table.x, y: table.y },
-      };
+      const element = getTableBulkElement(table);
       const tableRect = {
         x: table.x,
         y: table.y,
@@ -199,7 +271,9 @@ export default function Canvas() {
 
     if (!e.isPrimary) return;
 
-    if (!element.locked || !(e.ctrlKey || e.metaKey)) {
+    const elementIsLocked = isElementLockedForMovement(element, type);
+
+    if (!elementIsLocked || !(e.ctrlKey || e.metaKey)) {
       setSelectedElement((prev) => ({
         ...prev,
         element: type,
@@ -208,7 +282,7 @@ export default function Canvas() {
       }));
     }
 
-    if (element.locked) {
+    if (elementIsLocked) {
       if (!(e.ctrlKey || e.metaKey)) {
         setBulkSelectedElements([]);
       }
@@ -222,12 +296,15 @@ export default function Canvas() {
 
     // this is the object that will be added to the bulk selected elements
     // if necessary
-    const elementInBulk = {
-      id: element.id,
-      type,
-      currentCoords: { x: element.x, y: element.y },
-      initialCoords: { x: element.x, y: element.y },
-    };
+    const elementInBulk =
+      type === ObjectType.TABLE
+        ? getTableBulkElement(element)
+        : {
+            id: element.id,
+            type,
+            currentCoords: { x: element.x, y: element.y },
+            initialCoords: { x: element.x, y: element.y },
+          };
 
     const isSelected = bulkSelectedElements.some((el) =>
       isSameElement(el, elementInBulk),
@@ -255,9 +332,25 @@ export default function Canvas() {
       return;
     }
 
-    if (!isSelected) {
-      setBulkSelectedElements([elementInBulk]);
+    let nextBulkSelectedElements = bulkSelectedElements;
+
+    if (type === ObjectType.TABLE) {
+      nextBulkSelectedElements = [elementInBulk];
     }
+
+    if (!isSelected) {
+      nextBulkSelectedElements = [elementInBulk];
+    }
+
+    if (type === ObjectType.AREA) {
+      const areaTables = getTablesInsideAreaAsBulkElements(element);
+      nextBulkSelectedElements = mergeBulkElements([
+        ...nextBulkSelectedElements,
+        ...areaTables,
+      ]);
+    }
+
+    setBulkSelectedElements(nextBulkSelectedElements);
     setDragging({
       id: element.id,
       type,
@@ -282,7 +375,7 @@ export default function Canvas() {
    * @param {PointerEvent} e
    */
   const handlePointerMove = (e) => {
-    if (selectedElement.open && !layout.sidebar) return;
+    if (selectedElement.open && !layout.sidebar && !settings.handTool) return;
 
     if (!e.isPrimary) return;
 
@@ -313,13 +406,19 @@ export default function Canvas() {
     }
 
     if (isDragging()) {
+      const activeBulkSelectedElements =
+        dragging.type === ObjectType.TABLE &&
+        bulkSelectedElements.some((el) => el.type === ObjectType.AREA)
+          ? bulkSelectedElements.filter((el) => isSameElement(el, dragging))
+          : bulkSelectedElements;
+
       const { x: mainElementFinalX, y: mainElementFinalY } =
         coordinatesAfterSnappingToGrid({
           x: pointer.spaces.diagram.x - dragging.grabOffset.x,
           y: pointer.spaces.diagram.y - dragging.grabOffset.y,
         });
 
-      const { currentCoords } = bulkSelectedElements.find((el) =>
+      const { currentCoords } = activeBulkSelectedElements.find((el) =>
         isSameElement(el, dragging),
       );
 
@@ -327,13 +426,19 @@ export default function Canvas() {
       const deltaY = mainElementFinalY - currentCoords.y;
 
       const newBulkSelectedElements = [];
-      bulkSelectedElements.forEach((el) => {
+      activeBulkSelectedElements.forEach((el) => {
         const elementFinalCoords = {
           x: el.currentCoords.x + deltaX,
           y: el.currentCoords.y + deltaY,
         };
         if (el.type === ObjectType.TABLE) {
-          updateTable(el.id, { ...elementFinalCoords });
+          const tableData = tables.find((table) => table.id === el.id);
+          const tableLockedByArea = tableData
+            ? isTableInsideLockedArea(tableData)
+            : false;
+          if (tableData && !tableData.locked && !tableLockedByArea) {
+            updateTable(el.id, { ...elementFinalCoords });
+          }
         }
         if (el.type === ObjectType.AREA) {
           updateArea(el.id, { ...elementFinalCoords });
@@ -421,7 +526,8 @@ export default function Canvas() {
     if (
       selectedElement.element === ObjectType.TABLE &&
       selectedElement.open &&
-      !layout.sidebar
+      !layout.sidebar &&
+      !settings.handTool
     )
       return;
 
@@ -429,12 +535,28 @@ export default function Canvas() {
     const isMouseMiddleButton = e.button === 1;
 
     if (isMouseLeftButton) {
+      if (settings.handTool) {
+        setBulkSelectRect((prev) => ({ ...prev, show: false }));
+        setPanning({
+          isPanning: true,
+          panStart: transform.pan,
+          cursorStart: pointer.spaces.screen,
+        });
+        pointer.setStyle("grabbing");
+        return;
+      }
+
       setBulkSelectRect({
         x1: pointer.spaces.diagram.x,
         y1: pointer.spaces.diagram.y,
         x2: pointer.spaces.diagram.x,
         y2: pointer.spaces.diagram.y,
-        show: elementPointerDown === null || !elementPointerDown.element.locked,
+        show:
+          elementPointerDown === null ||
+          !isElementLockedForMovement(
+            elementPointerDown.element,
+            elementPointerDown.type,
+          ),
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
       });
@@ -482,34 +604,90 @@ export default function Canvas() {
       transform.pan.y === panning.panStart.y
     );
 
+  const applyPermanentTableGroupingAfterDrag = (elements) => {
+    return elements.map((el) => {
+      if (el.type !== ObjectType.TABLE) return el;
+
+      const tableData = tables.find((table) => table.id === el.id);
+      if (!tableData) return el;
+
+      const dropArea = getContainerAreaByTableCoords(
+        el.currentCoords.x,
+        el.currentCoords.y,
+      );
+
+      const currentAreaGroupId = tableData.areaGroupId ?? null;
+
+      if (!dropArea) {
+        return { ...el, currentAreaGroupId };
+      }
+
+      const nextAreaGroupId = getAreaGroupKey(dropArea);
+      if (currentAreaGroupId !== nextAreaGroupId) {
+        updateTable(el.id, { areaGroupId: nextAreaGroupId });
+      }
+
+      return { ...el, currentAreaGroupId: nextAreaGroupId };
+    });
+  };
+
   /**
    * @param {PointerEvent} e
    */
   const handlePointerUp = (e) => {
-    if (selectedElement.open && !layout.sidebar) return;
+    if (
+      selectedElement.open &&
+      !layout.sidebar &&
+      !panning.isPanning &&
+      !settings.handTool
+    )
+      return;
 
     if (!e.isPrimary) return;
 
     if (didDrag()) {
+      const updatedBulkSelectedElements =
+        applyPermanentTableGroupingAfterDrag(bulkSelectedElements);
       setUndoStack((prev) => [
         ...prev,
         {
           action: Action.MOVE,
           bulk: true,
           message: t("bulk_update"),
-          elements: bulkSelectedElements.map((el) => ({
-            id: el.id,
-            type: el.type,
-            undo: el.initialCoords,
-            redo: el.currentCoords,
-          })),
+          elements: updatedBulkSelectedElements.map((el) => {
+            if (el.type === ObjectType.TABLE) {
+              return {
+                id: el.id,
+                type: el.type,
+                undo: {
+                  ...el.initialCoords,
+                  areaGroupId: el.initialAreaGroupId ?? null,
+                },
+                redo: {
+                  ...el.currentCoords,
+                  areaGroupId: el.currentAreaGroupId ?? null,
+                },
+              };
+            }
+            return {
+              id: el.id,
+              type: el.type,
+              undo: el.initialCoords,
+              redo: el.currentCoords,
+            };
+          }),
         },
       ]);
       setRedoStack([]);
-      setBulkSelectedElements((prev) =>
-        prev.map((el) => ({
+      setBulkSelectedElements(
+        updatedBulkSelectedElements.map((el) => ({
           ...el,
           initialCoords: { ...el.currentCoords },
+          ...(el.type === ObjectType.TABLE
+            ? {
+                initialAreaGroupId: el.currentAreaGroupId ?? null,
+              }
+            : {}),
         })),
       );
     }
@@ -531,7 +709,7 @@ export default function Canvas() {
       setSaveState(State.SAVING);
     }
     setPanning((old) => ({ ...old, isPanning: false }));
-    pointer.setStyle("default");
+    pointer.setStyle(settings.handTool ? "grab" : "default");
 
     if (linking) handleLinking();
     setLinking(false);

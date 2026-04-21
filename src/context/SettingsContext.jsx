@@ -3,6 +3,7 @@ import { tableWidth } from "../data/constants";
 
 const defaultSettings = {
   strictMode: false,
+  handTool: false,
   showFieldSummary: true,
   showGrid: true,
   snapToGrid: false,
